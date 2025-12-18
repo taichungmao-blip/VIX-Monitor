@@ -1,1 +1,28 @@
+name: VIX Global Risk Monitor
 
+on:
+  schedule:
+    # 每天台灣時間早上 05:30 執行 (美股收盤前夕)
+    - cron: '30 21 * * *'
+  workflow_dispatch: # 允許手動執行測試
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 檢出代碼
+        uses: actions/checkout@v3
+
+      - name: 設定 Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: 安裝套件
+        run: |
+          pip install yfinance requests
+
+      - name: 執行 VIX 監控
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+        run: python vix_monitor.py
