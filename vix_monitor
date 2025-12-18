@@ -1,0 +1,48 @@
+import os
+import requests
+import yfinance as yf
+from datetime import datetime
+
+# 從 GitHub Secrets 讀取
+DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK")
+
+def monitor_vix():
+    # 1. 抓取 VIX 指數數據
+    vix = yf.Ticker("^VIX").history(period="10d")
+    if vix.empty: return
+    
+    last_vix = vix['Close'].iloc[-1]
+    prev_vix = vix['Close'].iloc[-2]
+    vix_change = ((last_vix - prev_vix) / prev_vix) * 100
+    
+    # 2. 判斷風險等級
+    risk_level = "🟢 市場穩定"
+    alert_icon = ""
+    
+    if last_vix >= 30:
+        risk_level = "🔴 極度恐慌 (崩盤風險)"
+        alert_icon = "🆘 "
+    elif last_vix >= 25:
+        risk_level = "🟠 高度恐慌 (劇烈波動)"
+        alert_icon = "⚠️ "
+    elif last_vix >= 20 or vix_change > 15:
+        risk_level = "🟡 警戒上升 (避險情緒增強)"
+        alert_icon = "👀 "
+
+    # 3. 建立訊息
+    msg = f"{alert_icon}**美股恐慌指數 VIX 監控** ({datetime.now().strftime('%Y-%m-%d')})\n"
+    msg += f"當前數值: {last_vix:.2f} (單日變動: {vix_change:+.2f}%)\n"
+    msg += f"風險狀態: {risk_level}\n"
+    msg += "---"
+    
+    if last_vix > 20:
+        msg += "\n💡 **操作策略參考：** 市場避險情緒濃厚，散裝航運股容易受大盤拖累，建議暫緩追高或收緊停損點。"
+    else:
+        msg += "\n✅ 市場情緒平穩，可回歸基本面與籌碼面操作。"
+
+    # 4. 發送通知
+    if DISCORD_WEBHOOK_URL:
+        requests.post(DISCORD_WEBHOOK_URL, json={"content": msg})
+
+if __name__ == "__main__":
+    monitor_vix()
