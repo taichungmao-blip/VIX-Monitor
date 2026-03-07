@@ -20,7 +20,7 @@ jobs:
 
       - name: 安裝套件
         run: |
-          pip install yfinance requests
+          pip install yfinance requests matplotlib
 
       - name: 執行 VIX 監控
         env:
