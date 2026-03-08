@@ -8,6 +8,7 @@ from datetime import datetime
 DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK")
 
 def get_data_info(symbol, name):
+    """取得 yfinance 的指標資訊"""
     ticker = yf.Ticker(symbol)
     df = ticker.history(period="5d")
     if df.empty: return f"{name}: 獲取失敗", 0, 0
@@ -16,6 +17,37 @@ def get_data_info(symbol, name):
     prev_val = df['Close'].iloc[-2]
     change = ((last_val - prev_val) / prev_val) * 100
     return f"{name}: {last_val:.2f} ({change:+.2f}%)", last_val, change
+
+def get_fear_and_greed():
+    """模擬瀏覽器標頭抓取 CNN 恐慌與貪婪指數"""
+    url = "https://production.dataviz.cnn.io/index/fearandgreed/graphdata"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36",
+        "Accept": "application/json, text/plain, */*",
+        "Origin": "https://edition.cnn.com",
+        "Referer": "https://edition.cnn.com/"
+    }
+    try:
+        res = requests.get(url, headers=headers, timeout=10)
+        res.raise_for_status()
+        data = res.json()
+        score = int(data["fear_and_greed"]["score"])
+        rating = data["fear_and_greed"]["rating"]
+        
+        # 轉換成中文顯示
+        rating_map = {
+            "extreme fear": "極度恐慌",
+            "fear": "恐慌",
+            "neutral": "中立",
+            "greed": "貪婪",
+            "extreme greed": "極度貪婪"
+        }
+        rating_tw = rating_map.get(rating.lower(), rating.title())
+        return score, rating_tw
+        
+    except Exception as e:
+        print(f"Fear & Greed Index 獲取失敗 (可能遭阻擋): {e}")
+        return None, "獲取失敗"
 
 def generate_trend_chart():
     """抓取過去 6 個月的資料並生成走勢圖"""
@@ -47,20 +79,42 @@ def generate_trend_chart():
     plt.close()
     return chart_filename
 
-def get_market_strategy(vix_val, tnx_chg, dxy_chg, oil_chg):
-    """根據四大指標變動，產生板塊輪動與交易策略建議"""
+def get_market_strategy(vix_val, tnx_chg, dxy_chg, oil_chg, fg_score):
+    """根據五大指標變動，產生板塊輪動與交易策略建議"""
     buy_sectors = []
     avoid_sectors = []
     notes = []
 
-    # 1. VIX 判斷 (市場恐慌度)
-    if vix_val > 25:
-        buy_sectors.append("防禦型標的 (如公用事業)、現金部位")
-        avoid_sectors.append("高 Beta 科技股、中小型股")
-        notes.append("VIX 處於高位，系統性風險增加，建議降低整體持股水位。")
-    elif vix_val < 15:
-        buy_sectors.append("科技成長股、可轉債 (CB)")
-        notes.append("市場情緒穩定，有利於股權資產與可轉債發揮選擇權價值。")
+    # 1. 恐慌與貪婪指數 (F&G) 與 VIX 交叉比對
+    if fg_score is not None:
+        if fg_score <= 25: # 極度恐慌區間
+            if vix_val > 25:
+                buy_sectors.append("防禦型標的 (公用事業)、大盤指數 ETF (分批建倉)")
+                avoid_sectors.append("高 Beta 科技股、中小型股")
+                notes.append("F&G 顯示「極度恐慌」且 VIX 飆高，短線下殺動能強。但長線投資人可開始留意被錯殺的績優股分批左側建倉。")
+            else:
+                buy_sectors.append("績優成長股、市值型 ETF")
+                notes.append("市場情緒雖然「極度恐慌」，但實質波動率(VIX)未再創高，可能出現逢低買進的絕佳反彈契機。")
+        elif fg_score >= 75: # 極度貪婪區間
+            buy_sectors.append("現金部位、短天期美債")
+            avoid_sectors.append("熱門追高股、本夢比飆股")
+            notes.append("F&G 顯示市場處於「極度貪婪」，散戶過度樂觀，隨時有獲利了結賣壓，建議適度減碼並提高現金水位。")
+        else:
+            # 中性情緒，回歸 VIX 判斷
+            if vix_val > 20:
+                notes.append("情緒屬中性，但 VIX 處於高位，市場暗流湧動，留意部位控管。")
+            elif vix_val < 15:
+                buy_sectors.append("科技成長股、可轉債 (CB)")
+                notes.append("市場情緒穩定 (F&G 中性，VIX 低位)，有利於股權與可轉債資產表現。")
+    else:
+        # F&G 獲取失敗的備援：單純依賴 VIX 判斷
+        if vix_val > 25:
+            buy_sectors.append("防禦型標的 (如公用事業)、現金部位")
+            avoid_sectors.append("高 Beta 科技股、中小型股")
+            notes.append("VIX 處於高位，系統性風險增加，建議降低整體持股水位。")
+        elif vix_val < 15:
+            buy_sectors.append("科技成長股、可轉債 (CB)")
+            notes.append("市場情緒穩定，有利於股權資產與可轉債發揮選擇權價值。")
 
     # 2. TNX 判斷 (利率環境)
     if tnx_chg > 1.5:  
@@ -89,9 +143,8 @@ def get_market_strategy(vix_val, tnx_chg, dxy_chg, oil_chg):
     if not buy_sectors and not avoid_sectors:
         buy_sectors.append("回歸個股基本面與籌碼面")
         avoid_sectors.append("無明顯弱勢板塊")
-        notes.append("四大指標無劇烈波動，大盤進入震盪整理或緩步墊高格局。")
+        notes.append("各項指標無劇烈波動，大盤進入震盪整理或緩步墊高格局。")
 
-    # 移除重複項目並轉為字串
     buy_str = "、".join(list(dict.fromkeys(buy_sectors)))
     avoid_str = "、".join(list(dict.fromkeys(avoid_sectors)))
     notes_str = "\n".join([f"🔹 {n}" for n in notes])
@@ -105,11 +158,21 @@ def monitor_global_risk():
     tnx_str, tnx_val, tnx_chg = get_data_info("^TNX", "10年美債殖利率")
     dxy_str, dxy_val, dxy_chg = get_data_info("DX-Y.NYB", "美元指數")
     oil_str, oil_val, oil_chg = get_data_info("CL=F", "WTI 原油價格")
+    
+    fg_score, fg_rating = get_fear_and_greed()
+    if fg_score is not None:
+        fg_str = f"CNN 恐慌貪婪: {fg_score} ({fg_rating})"
+    else:
+        fg_str = f"CNN 恐慌貪婪: {fg_rating}"
 
-    # 綜合風險狀態判斷
+    # 綜合風險狀態判斷 (加入 F&G 評估)
     risk_score = 0
     if vix_val > 25: risk_score += 2
     elif vix_val > 20: risk_score += 1
+    
+    if fg_score is not None and fg_score <= 25: 
+        risk_score += 1 # 極度恐慌加重市場風險狀態
+        
     if tnx_chg > 1.5: risk_score += 1
     if dxy_chg > 0.4: risk_score += 1
     
@@ -117,7 +180,7 @@ def monitor_global_risk():
     risk_status = status_map.get(min(risk_score, 4), "🟠 警戒上升")
 
     # 取得策略建議
-    buy_str, avoid_str, notes_str = get_market_strategy(vix_val, tnx_chg, dxy_chg, oil_chg)
+    buy_str, avoid_str, notes_str = get_market_strategy(vix_val, tnx_chg, dxy_chg, oil_chg, fg_score)
 
     # 建立 Discord 文字訊息
     msg = (
@@ -125,6 +188,7 @@ def monitor_global_risk():
         f"📅 日期: {datetime.now().strftime('%Y-%m-%d')}\n"
         f"---"
         f"\n⚠️ **{vix_str}**"
+        f"\n🧭 **{fg_str}**"
         f"\n📈 **{tnx_str}**"
         f"\n💵 **{dxy_str}**"
         f"\n🛢️ **{oil_str}**"
@@ -136,7 +200,7 @@ def monitor_global_risk():
         f"📝 **市場觀察**:\n{notes_str}"
     )
 
-    # 生成圖表
+    # 生成圖表 (圖表維持原本四大來源，因為 CNN 資料無法由 yfinance 畫出長天期走勢)
     chart_path = generate_trend_chart()
 
     # 發送通知
