@@ -7,16 +7,27 @@ from datetime import datetime
 # 從 GitHub Secrets 讀取 Webhook
 DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK")
 
+# --- 新增共用的 Session 並設定 User-Agent 來繞過 yfinance 阻擋 ---
+yf_session = requests.Session()
+yf_session.headers.update({
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+})
+
 def get_data_info(symbol, name):
     """取得 yfinance 的指標資訊"""
-    ticker = yf.Ticker(symbol)
-    df = ticker.history(period="5d")
-    if df.empty: return f"{name}: 獲取失敗", 0, 0
-    
-    last_val = df['Close'].iloc[-1]
-    prev_val = df['Close'].iloc[-2]
-    change = ((last_val - prev_val) / prev_val) * 100
-    return f"{name}: {last_val:.2f} ({change:+.2f}%)", last_val, change
+    ticker = yf.Ticker(symbol, session=yf_session)
+    try:
+        df = ticker.history(period="5d")
+        if df.empty: 
+            return f"{name}: 獲取失敗", 0, 0
+        
+        last_val = df['Close'].iloc[-1]
+        prev_val = df['Close'].iloc[-2]
+        change = ((last_val - prev_val) / prev_val) * 100
+        return f"{name}: {last_val:.2f} ({change:+.2f}%)", last_val, change
+    except Exception as e:
+        print(f"取得 {name} 資料發生錯誤: {e}")
+        return f"{name}: 獲取失敗", 0, 0
 
 def get_fear_and_greed():
     """模擬瀏覽器標頭抓取 CNN 恐慌與貪婪指數"""
@@ -64,7 +75,7 @@ def generate_trend_chart():
     
     for ax, (symbol, name) in zip(axs, tickers.items()):
         try:
-            df = yf.Ticker(symbol).history(period="6mo")
+            df = yf.Ticker(symbol, session=yf_session).history(period="6mo")
             if not df.empty:
                 ax.plot(df.index, df['Close'], label=name, color='#1f77b4')
                 ax.set_ylabel("Price / Yield")
