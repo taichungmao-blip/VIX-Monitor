@@ -7,15 +7,10 @@ from datetime import datetime
 # 從 GitHub Secrets 讀取 Webhook
 DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK")
 
-# --- 新增共用的 Session 並設定 User-Agent 來繞過 yfinance 阻擋 ---
-yf_session = requests.Session()
-yf_session.headers.update({
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
-})
-
 def get_data_info(symbol, name):
     """取得 yfinance 的指標資訊"""
-    ticker = yf.Ticker(symbol, session=yf_session)
+    # 移除手動 session，讓 yfinance 自行處理
+    ticker = yf.Ticker(symbol)
     try:
         df = ticker.history(period="5d")
         if df.empty: 
@@ -75,7 +70,8 @@ def generate_trend_chart():
     
     for ax, (symbol, name) in zip(axs, tickers.items()):
         try:
-            df = yf.Ticker(symbol, session=yf_session).history(period="6mo")
+            # 移除手動 session
+            df = yf.Ticker(symbol).history(period="6mo")
             if not df.empty:
                 ax.plot(df.index, df['Close'], label=name, color='#1f77b4')
                 ax.set_ylabel("Price / Yield")
@@ -211,7 +207,7 @@ def monitor_global_risk():
         f"📝 **市場觀察**:\n{notes_str}"
     )
 
-    # 生成圖表 (圖表維持原本四大來源，因為 CNN 資料無法由 yfinance 畫出長天期走勢)
+    # 生成圖表
     chart_path = generate_trend_chart()
 
     # 發送通知
