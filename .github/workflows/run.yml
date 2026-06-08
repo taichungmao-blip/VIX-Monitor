@@ -3,7 +3,7 @@ name: VIX Global Risk Monitor
 on:
   schedule:
     # 每天台灣時間早上 05:30 執行 (美股收盤前夕)
-    - cron: '30 21 * * *'
+    - cron: '30 21 * * 1-5'
   workflow_dispatch: # 允許手動執行測試
 
 jobs:
